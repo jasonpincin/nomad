@@ -9,8 +9,10 @@ eval $(triton env)
 ./provision-nomad-client
 
 # Update environment
+MY_IP=$(curl http://ipinfo.io/ip) \
+INSTANCE_ID=$(triton instance get nomad-server-1 | json id) \
 triton fwrule create \
-    "FROM ip $(curl http://ipinfo.io/ip) TO vm $(triton instance get nomad-server-1 | json id) ALLOW tcp (PORT 4646 AND PORT 4647 AND PORT 8500)"
+    "FROM ip ${MY_IP} TO vm ${INSTANCE_ID} ALLOW tcp (PORT 4646 AND PORT 4647 AND PORT 8500)"
 export NOMAD_ADDR="http://$(triton ip nomad-server-1):4646"
 
 # Run some jobs

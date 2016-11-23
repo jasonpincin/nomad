@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+FIRST_SERVER_NUMBER=$(triton instance ls -Ho name name=nomad-server | cut -d- -f3 | sort -n | head -n 1)
+LAST_SERVER_NUMBER=$(triton instance ls -Ho name name=nomad-server | cut -d- -f3 | sort -n | tail -n 1)
+LAST_SERVER_NUMBER=${LAST_SERVER_NUMBER:-0}
+SERVER_NUMBER=$((LAST_SERVER_NUMBER+1))
+
+BOOTSTRAP="true"
+CONSUL_JOIN=$(triton instance get nomad-server-${FIRST_SERVER_NUMBER} -j 2> /dev/null | json ips.1 | sed -e 's/\(.*\)/"\1"/')
+if [[ "${CONSUL_JOIN}" != "" ]]; then
+    BOOTSTRAP="false"
+    echo "Adding Nomad server to existing cluster."
+else
+    echo "Bootstrapping Nomad cluster."
+fi
+
+NODE_NAME=nomad-server-${SERVER_NUMBER}
+DC_NAME=$(triton profile get | awk -F"/" '/url:/{print $3}' | awk -F'.' '{print $1}')
+REGION=$(echo $DC_NAME | cut -d- -f1)
+
+cat scripts/nomad-server-install-triton-ubuntu14.bash \
+    | sed "s/%BOOTSTRAP%/${BOOTSTRAP}/g" \
+    | sed "s/%NODE_NAME%/${NODE_NAME}/g" \
+    | sed "s/%REGION%/${REGION}/g" \
+    | sed "s/%DC_NAME%/${DC_NAME}/g" \
+    | sed "s/%CONSUL_JOIN%/${CONSUL_JOIN}/g" \
+    > /tmp/${NODE_NAME}.bash
+SCRIPT=/tmp/${NODE_NAME}.bash
+
+echo "Provisioning ${NODE_NAME}..."
+triton instance create \
+    --name=${NODE_NAME} \
+    --firewall \
+     $(triton images name=~ubuntu-14.04 type=lx-dataset -Ho id | tail -1) \
+    g4-highcpu-1G \
+    --wait \
+    --script=${SCRIPT}
+
+INSTANCE_ID=$(triton instance get ${NODE_NAME} | json id)
+echo "Opening SSH to world:"
+triton fwrule create "FROM any TO vm ${INSTANCE_ID} ALLOW tcp PORT 22"
+echo "Opening all TCP/UDP ports to private network:"
+triton fwrule create "FROM subnet 10.0.0.0/8 TO vm ${INSTANCE_ID} ALLOW tcp PORT all"
+triton fwrule create "FROM subnet 10.0.0.0/8 TO vm ${INSTANCE_ID} ALLOW udp PORT all"

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+NOMAD_SERVERS=$(triton instance ls name=nomad-server -j | json -ga ips.1 | sed -e 's/\(.*\)/"\1"/' | paste -sd ',' -)
+if [ "$NOMAD_SERVERS" == "" ]; then
+    echo "Must deploy at least one Nomad server before deploying clients."
+    exit 1
+fi
+
+LAST_CLIENT_NUMBER=$(triton instance ls -Ho name name=nomad-client | cut -d- -f3 | sort -n | tail -n 1)
+LAST_CLIENT_NUMBER=${LAST_CLIENT_NUMBER:-0}
+CLIENT_NUMBER=$((LAST_CLIENT_NUMBER+1))
+
+NODE_NAME=nomad-client-${CLIENT_NUMBER}
+DC_NAME=$(triton profile get | awk -F"/" '/url:/{print $3}' | awk -F'.' '{print $1}')
+REGION=$(echo $DC_NAME | cut -d- -f1)
+
+cat scripts/nomad-client-install-triton-ubuntu14.bash \
+    | sed "s/%NODE_NAME%/${NODE_NAME}/g" \
+    | sed "s/%REGION%/${REGION}/g" \
+    | sed "s/%DC_NAME%/${DC_NAME}/g" \
+    | sed "s/%NOMAD_SERVERS%/${NOMAD_SERVERS}/g" \
+    > /tmp/${NODE_NAME}.bash
+SCRIPT=/tmp/${NODE_NAME}.bash
+
+echo "Provisioning ${NODE_NAME}..."
+triton instance create \
+    --name=${NODE_NAME} \
+    --firewall \
+    $(triton images name=~ubuntu-certified-14.04 type=zvol -Ho id | tail -1) \
+    k4-general-kvm-3.75G \
+    --wait \
+    --script=${SCRIPT}
+
+INSTANCE_ID=$(triton instance get ${NODE_NAME} | json id)
+echo "Opening SSH to world:"
+triton fwrule create "FROM any TO vm ${INSTANCE_ID} ALLOW tcp PORT 22"
+echo "Opening HTTP to world:"
+triton fwrule create "FROM any TO vm ${INSTANCE_ID} ALLOW tcp PORT 80"
+echo "Opening all TCP/UDP ports to private network:"
+triton fwrule create "FROM subnet 10.0.0.0/8 TO vm ${INSTANCE_ID} ALLOW tcp PORT all"
+triton fwrule create "FROM subnet 10.0.0.0/8 TO vm ${INSTANCE_ID} ALLOW udp PORT all"

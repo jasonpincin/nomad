@@ -1,0 +1,10 @@
+{
+  "name": "blog",
+  "version": "1.0.0",
+  "description": "Place-holder for a real blog service",
+  "author": "Jason Pincin, Joyent",
+  "license": "MPL-2.0",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
